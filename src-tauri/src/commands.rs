@@ -49,6 +49,18 @@ pub async fn save_config(
     if old_schedule != cfg.schedule {
         crate::scheduler::restart(app.clone(), state.inner().clone());
     }
+
+    // Reconcile firewall rules against the (now-current) config. Without
+    // this, toggling `firewall_block` on a target — or flipping the global
+    // "include historical paths" switch — wouldn't take effect until the
+    // next scheduler tick fires `firewall_react_to_verdict` via the
+    // verdict subscriber. That lag was the reason "open immediately after
+    // enabling the toggle" didn't block. Apply-set is idempotent so this
+    // is safe regardless of whether firewall-related fields actually
+    // changed in this save.
+    if let Some(verdict) = state.verdict.current() {
+        firewall_react_to_verdict(state.inner(), &verdict);
+    }
     Ok(())
 }
 
@@ -173,6 +185,13 @@ pub fn firewall_react_to_verdict(state: &AppState, report: &crate::detector::Det
             state.firewall.remember_path(exe.clone());
         }
     }
+    let any_target_firewall = cfg.processes.iter().any(|t| t.firewall_block);
+    tracing::debug!(
+        matched = report.matched,
+        running_matches = processes_now.len(),
+        any_target_firewall,
+        "firewall: reconciling rules against current verdict"
+    );
 
     // Verdict matched (or no allow-list to enforce) → no rules.
     if report.matched || report.allowed_ips.is_empty() {
@@ -206,6 +225,11 @@ pub fn firewall_react_to_verdict(state: &AppState, report: &crate::detector::Det
         }
     }
 
+    tracing::info!(
+        want_count = want.len(),
+        scope_historical = cfg.firewall_block_include_historical_paths,
+        "firewall: applying desired block set"
+    );
     state.firewall.apply_block_set(&want);
 }
 
