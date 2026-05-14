@@ -93,7 +93,7 @@ pub fn kill_processes(
 
 #[tauri::command]
 pub fn last_report(state: tauri::State<'_, AppState>) -> Option<DetectionReport> {
-    state.last_report.lock().clone()
+    state.verdict.current()
 }
 
 #[tauri::command]
@@ -218,7 +218,7 @@ pub async fn run_detection_internal(
     let report =
         detector::run_detection(&cfg_snapshot, override_providers.clone(), override_allowed.clone())
             .await;
-    *state.last_report.lock() = Some(report.clone());
+    state.verdict.update(report.clone());
 
     info!(
         matched = report.matched,

@@ -104,7 +104,7 @@ pub fn show_main_window(app: &AppHandle) {
 /// to call after every config change, detection result, or scheduler toggle.
 pub fn refresh_state(app: &AppHandle, state: &AppState) {
     let sched_state = crate::scheduler::current_state(state);
-    let report = state.last_report.lock().clone();
+    let report = state.verdict.current();
 
     let visual = match sched_state {
         SchedulerState::Disabled | SchedulerState::Paused => TrayVisual::Idle,

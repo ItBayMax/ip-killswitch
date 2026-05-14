@@ -6,14 +6,18 @@ use parking_lot::Mutex;
 use tokio::sync::broadcast;
 
 use crate::config::AppConfig;
-use crate::detector::DetectionReport;
+use crate::verdict::VerdictCache;
 
 #[derive(Clone)]
 pub struct AppState {
     pub app_dir: PathBuf,
     pub log_dir: PathBuf,
     pub config: Arc<Mutex<AppConfig>>,
-    pub last_report: Arc<Mutex<Option<DetectionReport>>>,
+    /// Latest IP verdict — the single source of truth for "is the egress IP
+    /// currently in the allow-list?" Writers: the detection pipeline. Readers:
+    /// UI, tray, and (in upcoming commits) the process-watcher and firewall
+    /// modules. See `verdict.rs` for TTL / subscribe semantics.
+    pub verdict: VerdictCache,
     pub events: broadcast::Sender<AppEvent>,
     pub scheduler_handle: Arc<Mutex<Option<tauri::async_runtime::JoinHandle<()>>>>,
     /// Runtime-only pause toggle. When true, the scheduler stays stopped even
@@ -41,7 +45,7 @@ impl AppState {
             app_dir,
             log_dir,
             config: Arc::new(Mutex::new(cfg)),
-            last_report: Arc::new(Mutex::new(None)),
+            verdict: VerdictCache::new(),
             events: tx,
             scheduler_handle: Arc::new(Mutex::new(None)),
             scheduler_paused: Arc::new(AtomicBool::new(false)),

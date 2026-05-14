@@ -7,6 +7,7 @@ mod processes;
 mod scheduler;
 mod state;
 mod tray;
+mod verdict;
 
 use std::path::PathBuf;
 
