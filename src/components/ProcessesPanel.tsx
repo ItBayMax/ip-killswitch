@@ -100,8 +100,9 @@ export function ProcessesPanel() {
         <CardHeader>
           <CardTitle>目标进程</CardTitle>
           <CardDescription>
-            可填入 exe 名（如 <code>chrome.exe</code>）、进程名或可执行路径片段。
-            匹配规则：完整等值优先，其次基于文件名等值，最后回退到子串匹配。
+            可填入 exe 名（如 <code>claude.exe</code>）或进程名关键字。
+            匹配规则：完整等值 → 文件名等值 → 进程名子串。
+            每行可单独配置「忽略大小写 / 匹配可执行路径 / 关联子进程」（路径匹配默认关，需要先开管理员模式才能读到系统进程的路径）。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -122,47 +123,87 @@ export function ProcessesPanel() {
 
           <div className="space-y-2">
             {config.processes.map((p, idx) => (
-              <div key={p.id} className="grid grid-cols-12 gap-2 items-center border rounded-md p-2">
-                <div className="col-span-4">
-                  <Input
-                    placeholder="标签 (UI 显示)"
-                    value={p.label}
-                    onChange={(e) => {
-                      const next = [...config.processes];
-                      next[idx] = { ...p, label: e.target.value };
-                      setTargets(next);
-                    }}
-                  />
+              <div key={p.id} className="border rounded-md p-2 space-y-2">
+                <div className="grid grid-cols-12 gap-2 items-center">
+                  <div className="col-span-4">
+                    <Input
+                      placeholder="标签 (UI 显示)"
+                      value={p.label}
+                      onChange={(e) => {
+                        const next = [...config.processes];
+                        next[idx] = { ...p, label: e.target.value };
+                        setTargets(next);
+                      }}
+                    />
+                  </div>
+                  <div className="col-span-6">
+                    <Input
+                      placeholder="进程名 / exe 名 / 路径片段"
+                      value={p.name}
+                      onChange={(e) => {
+                        const next = [...config.processes];
+                        next[idx] = { ...p, name: e.target.value };
+                        setTargets(next);
+                      }}
+                    />
+                  </div>
+                  <div className="col-span-1 flex items-center">
+                    <Switch
+                      checked={p.enabled}
+                      onCheckedChange={(v) => {
+                        const next = [...config.processes];
+                        next[idx] = { ...p, enabled: v };
+                        setTargets(next);
+                      }}
+                    />
+                  </div>
+                  <div className="col-span-1 flex items-center justify-end">
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => setTargets(config.processes.filter((x) => x.id !== p.id))}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
-                <div className="col-span-6">
-                  <Input
-                    placeholder="进程名 / exe 名 / 路径片段"
-                    value={p.name}
-                    onChange={(e) => {
-                      const next = [...config.processes];
-                      next[idx] = { ...p, name: e.target.value };
-                      setTargets(next);
-                    }}
-                  />
-                </div>
-                <div className="col-span-1 flex items-center">
-                  <Switch
-                    checked={p.enabled}
-                    onCheckedChange={(v) => {
-                      const next = [...config.processes];
-                      next[idx] = { ...p, enabled: v };
-                      setTargets(next);
-                    }}
-                  />
-                </div>
-                <div className="col-span-1 flex items-center justify-end">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    onClick={() => setTargets(config.processes.filter((x) => x.id !== p.id))}
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pl-1 text-xs text-muted-foreground">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Switch
+                      checked={p.case_insensitive}
+                      onCheckedChange={(v) => {
+                        const next = [...config.processes];
+                        next[idx] = { ...p, case_insensitive: v };
+                        setTargets(next);
+                      }}
+                    />
+                    <span>忽略大小写</span>
+                  </label>
+                  <label
+                    className="flex items-center gap-2 cursor-pointer"
+                    title="把关键字作为完整 exe 路径的子串来匹配。短关键词易误伤，请下方表格里核对结果。"
                   >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                    <Switch
+                      checked={p.match_path}
+                      onCheckedChange={(v) => {
+                        const next = [...config.processes];
+                        next[idx] = { ...p, match_path: v };
+                        setTargets(next);
+                      }}
+                    />
+                    <span>匹配可执行路径</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Switch
+                      checked={p.match_children}
+                      onCheckedChange={(v) => {
+                        const next = [...config.processes];
+                        next[idx] = { ...p, match_children: v };
+                        setTargets(next);
+                      }}
+                    />
+                    <span>关联子进程（树遍历）</span>
+                  </label>
                 </div>
               </div>
             ))}
@@ -178,6 +219,9 @@ export function ProcessesPanel() {
                       label: `进程 ${config.processes.length + 1}`,
                       name: "",
                       enabled: true,
+                      case_insensitive: true,
+                      match_children: false,
+                      match_path: false,
                     },
                   ])
                 }
@@ -227,8 +271,14 @@ export function ProcessesPanel() {
                     <tr key={p.pid} className="border-t">
                       <td className="py-2 pr-3 font-mono">{p.pid}</td>
                       <td className="py-2 pr-3 font-medium">{p.name}</td>
-                      <td className="py-2 pr-3">
+                      <td className="py-2 pr-3 space-x-1">
                         <Badge variant="secondary">{p.matched_target_label}</Badge>
+                        {p.via_children ? (
+                          <Badge variant="outline" className="text-xs">子</Badge>
+                        ) : null}
+                        {p.via_path ? (
+                          <Badge variant="outline" className="text-xs" title="经由可执行路径匹配">路径</Badge>
+                        ) : null}
                       </td>
                       <td className="py-2 pr-3 text-xs text-muted-foreground break-all">
                         {p.exe ?? "—"}

@@ -14,6 +14,15 @@ export interface ProcessTarget {
   label: string;
   name: string;
   enabled: boolean;
+  /** Case-insensitive name matching (default true). */
+  case_insensitive: boolean;
+  /** Also kill descendants of a matched process (default false). */
+  match_children: boolean;
+  /** Also match keyword against the full exe path (default false). Useful
+   * when the process name doesn't contain the keyword but its install dir
+   * does. Requires a readable exe path (i.e. admin elevation for system
+   * processes). */
+  match_path: boolean;
 }
 
 export type Schedule =
@@ -67,6 +76,9 @@ export interface DiscoveredProcess {
   exe?: string | null;
   matched_target_id: string;
   matched_target_label: string;
+  via_children?: boolean;
+  /** Matched via full exe path substring (target had `match_path: true`). */
+  via_path?: boolean;
 }
 
 export interface KillOutcome {

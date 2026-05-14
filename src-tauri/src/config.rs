@@ -64,14 +64,37 @@ pub struct ProcessTarget {
     /// Friendly label shown in UI.
     pub label: String,
     /// Matched against the process name (e.g. "chrome.exe" or "node").
-    /// Comparison is case-insensitive on Windows, case-sensitive elsewhere.
     pub name: String,
     #[serde(default = "ProcessTarget::default_enabled")]
     pub enabled: bool,
+    /// When true (default), `name` matches process names without regard for
+    /// letter case on all platforms. When false, comparison is byte-exact.
+    #[serde(default = "ProcessTarget::default_case_insensitive")]
+    pub case_insensitive: bool,
+    /// When true, every descendant of a matched process (per `parent_pid`
+    /// relationship) is also included. Useful for apps that fork helper /
+    /// renderer / GPU subprocesses. Defaults off because Windows services
+    /// often get re-parented to services.exe and would not be reachable
+    /// through this anyway.
+    #[serde(default)]
+    pub match_children: bool,
+    /// When true, also try matching `name` as a substring of the process's
+    /// full executable path. Useful when the actual process name doesn't
+    /// contain the keyword but its install directory does
+    /// (e.g. `cowork-svc.exe` under `...\AnthropicClaude\...`).
+    /// Defaults off because short keywords risk over-matching unrelated
+    /// processes under common path segments (`node_modules`, `AppData`, …).
+    /// Also requires the path to be readable (i.e. admin elevation for
+    /// system / other-user processes).
+    #[serde(default)]
+    pub match_path: bool,
 }
 
 impl ProcessTarget {
     fn default_enabled() -> bool {
+        true
+    }
+    fn default_case_insensitive() -> bool {
         true
     }
 }
