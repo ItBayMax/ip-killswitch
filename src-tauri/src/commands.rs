@@ -29,6 +29,11 @@ pub async fn save_config(
     cfg: AppConfig,
 ) -> Result<(), String> {
     let dir = state.app_dir.clone();
+    // Snapshot the schedule BEFORE we overwrite state so we can decide
+    // whether the scheduler actually needs restarting. Without this, every
+    // unrelated config change (e.g. changing the process refresh dropdown)
+    // would tear down and re-spawn the IP detection timer.
+    let old_schedule = state.config.lock().schedule.clone();
     config::save(&dir, &cfg).map_err(|e| e.to_string())?;
     *state.config.lock() = cfg.clone();
     let _ = state.events.send(AppEvent::ConfigUpdated);
@@ -41,7 +46,9 @@ pub async fn save_config(
             let _ = app.autolaunch().disable();
         }
     }
-    crate::scheduler::restart(app.clone(), state.inner().clone());
+    if old_schedule != cfg.schedule {
+        crate::scheduler::restart(app.clone(), state.inner().clone());
+    }
     Ok(())
 }
 

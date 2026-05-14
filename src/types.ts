@@ -44,6 +44,9 @@ export interface AppConfig {
   close_to_tray: boolean;
   confirm_exit: boolean;
   log_level: string;
+  /** Auto-refresh interval for the "matched running processes" table.
+   *  0 = manual only. */
+  process_refresh_seconds: number;
 }
 
 export interface ProviderResult {

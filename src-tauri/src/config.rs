@@ -99,7 +99,7 @@ impl ProcessTarget {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Schedule {
     Disabled,
@@ -141,6 +141,12 @@ pub struct AppConfig {
     pub confirm_exit: bool,
     #[serde(default = "AppConfig::default_log_level")]
     pub log_level: String,
+    /// Interval (seconds) at which the "currently running matched processes"
+    /// table auto-refreshes. `0` means manual-only — the user must hit the
+    /// refresh button. Detection / kill paths are unaffected by this — they
+    /// re-enumerate freshly each time regardless.
+    #[serde(default = "AppConfig::default_process_refresh_seconds")]
+    pub process_refresh_seconds: u64,
 }
 
 impl AppConfig {
@@ -164,6 +170,9 @@ impl AppConfig {
     }
     fn default_log_level() -> String {
         "info".into()
+    }
+    fn default_process_refresh_seconds() -> u64 {
+        5
     }
 }
 
@@ -205,6 +214,7 @@ impl Default for AppConfig {
             close_to_tray: true,
             confirm_exit: true,
             log_level: "info".into(),
+            process_refresh_seconds: Self::default_process_refresh_seconds(),
         }
     }
 }

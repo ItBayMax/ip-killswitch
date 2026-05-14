@@ -24,10 +24,13 @@ export function ProcessesPanel() {
     dismissKillOutcomes,
   } = useStore();
 
+  const refreshSec = config?.process_refresh_seconds ?? 5;
   useEffect(() => {
-    const t = setInterval(refreshProcesses, 5000);
+    refreshProcesses();
+    if (refreshSec <= 0) return; // manual-only
+    const t = setInterval(refreshProcesses, refreshSec * 1000);
     return () => clearInterval(t);
-  }, []);
+  }, [refreshSec]);
 
   if (!config) return null;
 
@@ -102,7 +105,7 @@ export function ProcessesPanel() {
           <CardDescription>
             可填入 exe 名（如 <code>claude.exe</code>）或进程名关键字。
             匹配规则：完整等值 → 文件名等值 → 进程名子串。
-            每行可单独配置「忽略大小写 / 匹配可执行路径 / 关联子进程」（路径匹配默认关，需要先开管理员模式才能读到系统进程的路径）。
+            每行可单独配置「忽略大小写 / 关联子进程 / 匹配可执行路径」（路径匹配默认关，需要先开管理员模式才能读到系统进程的路径）。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -238,9 +241,33 @@ export function ProcessesPanel() {
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
           <div>
             <CardTitle>当前匹配的运行中进程</CardTitle>
-            <CardDescription>每 5 秒自动刷新；可手动结束。</CardDescription>
+            <CardDescription>
+              {refreshSec > 0
+                ? `每 ${refreshSec} 秒自动刷新；可手动结束。`
+                : "自动刷新已关闭，使用右侧按钮手动刷新。"}
+            </CardDescription>
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>刷新间隔</span>
+              <select
+                className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+                value={refreshSec}
+                onChange={(e) =>
+                  saveConfig({
+                    ...config!,
+                    process_refresh_seconds: Number(e.target.value),
+                  })
+                }
+              >
+                <option value={5}>5 秒</option>
+                <option value={10}>10 秒</option>
+                <option value={30}>30 秒</option>
+                <option value={60}>1 分钟</option>
+                <option value={300}>5 分钟</option>
+                <option value={0}>关闭</option>
+              </select>
+            </label>
             <Button size="sm" variant="outline" onClick={refreshProcesses}>
               <RefreshCw className="h-4 w-4 mr-1" />
               刷新
