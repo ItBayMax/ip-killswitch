@@ -1,3 +1,4 @@
+mod admin;
 mod commands;
 mod config;
 mod detector;
@@ -111,6 +112,8 @@ pub fn run() {
             commands::scheduler_status,
             commands::pause_scheduler,
             commands::resume_scheduler,
+            commands::is_elevated,
+            commands::relaunch_as_admin,
         ]);
 
     builder

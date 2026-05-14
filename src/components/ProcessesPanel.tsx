@@ -6,12 +6,23 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, RefreshCw, Skull } from "lucide-react";
+import { Plus, Trash2, RefreshCw, Skull, ShieldAlert, X } from "lucide-react";
 import { shortId } from "@/lib/utils";
+import { api } from "@/api";
 import type { ProcessTarget } from "@/types";
 
 export function ProcessesPanel() {
-  const { config, saveConfig, processes, refreshProcesses, killAllMatching, killPids } = useStore();
+  const {
+    config,
+    saveConfig,
+    processes,
+    refreshProcesses,
+    killAllMatching,
+    killPids,
+    elevated,
+    lastKillOutcomes,
+    dismissKillOutcomes,
+  } = useStore();
 
   useEffect(() => {
     const t = setInterval(refreshProcesses, 5000);
@@ -25,8 +36,66 @@ export function ProcessesPanel() {
     saveConfig({ ...config, processes });
   }
 
+  async function restartAsAdmin() {
+    try {
+      const accepted = await api.relaunchAsAdmin();
+      if (accepted) {
+        // New elevated instance is launching; bow out so single-instance
+        // doesn't collide.
+        await api.quitApp();
+      }
+    } catch (e) {
+      console.warn("relaunchAsAdmin failed:", e);
+    }
+  }
+
+  const killFailures = lastKillOutcomes.filter((o) => !o.killed);
+
   return (
     <div className="space-y-4">
+      {elevated === false ? (
+        <Card className="border-amber-500/40 bg-amber-500/5">
+          <CardContent className="flex items-center justify-between gap-4 py-3">
+            <div className="flex items-start gap-2 text-sm">
+              <ShieldAlert className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+              <div>
+                <div className="font-medium">未以管理员身份运行</div>
+                <div className="text-xs text-muted-foreground">
+                  系统服务、其他用户拥有的进程将无法被结束，部分进程的可执行路径也读不到。
+                </div>
+              </div>
+            </div>
+            <Button size="sm" variant="default" onClick={restartAsAdmin}>
+              以管理员身份重启
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {killFailures.length > 0 ? (
+        <Card className="border-destructive/40 bg-destructive/5">
+          <CardContent className="py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="text-sm">
+                <div className="font-medium text-destructive">
+                  {killFailures.length} 个进程未能结束
+                </div>
+                <ul className="text-xs text-muted-foreground mt-1 space-y-0.5 font-mono max-h-32 overflow-auto">
+                  {killFailures.map((o) => (
+                    <li key={o.pid}>
+                      [{o.pid}] {o.name || "(unknown)"} — {o.error ?? "unknown error"}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <Button size="icon" variant="ghost" onClick={dismissKillOutcomes}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle>目标进程</CardTitle>

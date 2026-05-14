@@ -1911,6 +1911,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "cron",
+ "libc",
  "once_cell",
  "parking_lot",
  "regex",
@@ -1934,6 +1935,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

@@ -144,6 +144,22 @@ pub fn quit_app(app: AppHandle) {
 }
 
 #[tauri::command]
+pub fn is_elevated() -> bool {
+    crate::admin::is_elevated()
+}
+
+/// Spawn an elevated copy of this binary. Returns `true` if the user accepted
+/// the UAC prompt and the new instance is launching, `false` if they declined.
+/// On Unix this currently returns an error string — the UI shouldn't offer
+/// the button there.
+#[tauri::command]
+pub async fn relaunch_as_admin() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(crate::admin::relaunch_as_admin)
+        .await
+        .map_err(|e| format!("join error: {e}"))?
+}
+
+#[tauri::command]
 pub fn show_main_window(app: AppHandle) {
     crate::tray::show_main_window(&app);
 }

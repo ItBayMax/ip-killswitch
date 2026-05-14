@@ -41,6 +41,21 @@ parking_lot = "0.12"
 uuid = { version = "1", features = ["v4", "serde"] }
 cron = "0.12"
 
+# Direct Win32 calls for: elevation detection (is_elevated), elevated
+# self-relaunch (ShellExecuteW + "runas"), and a kill path that returns
+# real Win32 error codes instead of just `false`.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_Threading",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

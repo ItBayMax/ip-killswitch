@@ -4,6 +4,7 @@ import type {
   AppConfig,
   DetectionReport,
   DiscoveredProcess,
+  KillOutcome,
   SchedulerState,
 } from "./types";
 
@@ -15,6 +16,8 @@ interface AppStore {
   pendingKill: DetectionReport | null;
   logs: string;
   schedulerState: SchedulerState;
+  elevated: boolean | null;
+  lastKillOutcomes: KillOutcome[];
   setConfig: (cfg: AppConfig) => void;
   loadConfig: () => Promise<void>;
   saveConfig: (cfg: AppConfig) => Promise<void>;
@@ -30,6 +33,8 @@ interface AppStore {
   refreshSchedulerState: () => Promise<void>;
   pauseScheduler: () => Promise<void>;
   resumeScheduler: () => Promise<void>;
+  refreshElevation: () => Promise<void>;
+  dismissKillOutcomes: () => void;
 }
 
 export const useStore = create<AppStore>((set, get) => ({
@@ -40,6 +45,8 @@ export const useStore = create<AppStore>((set, get) => ({
   pendingKill: null,
   logs: "",
   schedulerState: "disabled",
+  elevated: null,
+  lastKillOutcomes: [],
   setConfig: (cfg) => set({ config: cfg }),
   setReport: (r) => set({ report: r }),
   setDetecting: (v) => set({ detecting: v }),
@@ -81,11 +88,13 @@ export const useStore = create<AppStore>((set, get) => ({
     set({ processes: ps });
   },
   killAllMatching: async () => {
-    await api.killProcesses();
+    const outcomes = await api.killProcesses();
+    set({ lastKillOutcomes: outcomes });
     await get().refreshProcesses();
   },
   killPids: async (pids) => {
-    await api.killProcesses(pids);
+    const outcomes = await api.killProcesses(pids);
+    set({ lastKillOutcomes: outcomes });
     await get().refreshProcesses();
   },
   loadLogs: async () => {
@@ -104,4 +113,13 @@ export const useStore = create<AppStore>((set, get) => ({
     const s = await api.resumeScheduler();
     set({ schedulerState: s });
   },
+  refreshElevation: async () => {
+    try {
+      const ok = await api.isElevated();
+      set({ elevated: ok });
+    } catch {
+      set({ elevated: null });
+    }
+  },
+  dismissKillOutcomes: () => set({ lastKillOutcomes: [] }),
 }));

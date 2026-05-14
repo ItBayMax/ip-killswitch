@@ -33,4 +33,9 @@ export const api = {
   schedulerStatus: () => invoke<SchedulerState>("scheduler_status"),
   pauseScheduler: () => invoke<SchedulerState>("pause_scheduler"),
   resumeScheduler: () => invoke<SchedulerState>("resume_scheduler"),
+  isElevated: () => invoke<boolean>("is_elevated"),
+  /** Returns `true` if the UAC prompt was accepted (the caller should then
+   * call `quitApp` so the new elevated instance can take over). `false`
+   * means the user clicked No on the UAC dialog. */
+  relaunchAsAdmin: () => invoke<boolean>("relaunch_as_admin"),
 };

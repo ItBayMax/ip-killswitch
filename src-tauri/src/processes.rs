@@ -83,6 +83,11 @@ pub fn discover(targets: &[ProcessTarget]) -> Vec<DiscoveredProcess> {
     out
 }
 
+/// Kill a set of PIDs and return per-PID outcomes with a real error reason
+/// when the syscall fails. On Windows, this uses `OpenProcess(PROCESS_TERMINATE)`
+/// + `TerminateProcess` directly so we can surface `ACCESS_DENIED` distinctly
+/// from "process gone" or other failures. On Unix, falls back to libc's
+/// `kill(2)` with SIGKILL.
 pub fn kill(pids: &[u32]) -> Vec<KillOutcome> {
     let mut sys = System::new_with_specifics(
         RefreshKind::new().with_processes(ProcessRefreshKind::everything()),
@@ -92,26 +97,77 @@ pub fn kill(pids: &[u32]) -> Vec<KillOutcome> {
     let mut out = Vec::with_capacity(pids.len());
     for &pid in pids {
         let spid = sysinfo::Pid::from_u32(pid);
-        match sys.process(spid) {
-            Some(proc) => {
-                let name = proc.name().to_string_lossy().to_string();
-                let killed = proc.kill();
-                out.push(KillOutcome {
-                    pid,
-                    name,
-                    killed,
-                    error: if killed { None } else { Some("kill() returned false".into()) },
-                });
-            }
-            None => out.push(KillOutcome {
+        let name = sys
+            .process(spid)
+            .map(|p| p.name().to_string_lossy().to_string())
+            .unwrap_or_default();
+        if sys.process(spid).is_none() {
+            out.push(KillOutcome {
                 pid,
-                name: String::new(),
+                name,
                 killed: false,
-                error: Some("process not found".into()),
+                error: Some("process not found (already exited?)".into()),
+            });
+            continue;
+        }
+        match kill_one(pid) {
+            Ok(()) => out.push(KillOutcome {
+                pid,
+                name,
+                killed: true,
+                error: None,
+            }),
+            Err(reason) => out.push(KillOutcome {
+                pid,
+                name,
+                killed: false,
+                error: Some(reason),
             }),
         }
     }
     out
+}
+
+#[cfg(windows)]
+fn kill_one(pid: u32) -> Result<(), String> {
+    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED, GetLastError};
+    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if handle.is_null() {
+            let code = GetLastError();
+            return Err(if code == ERROR_ACCESS_DENIED {
+                "Access denied — try running as administrator".into()
+            } else {
+                format!("OpenProcess failed (Win32 error {code})")
+            });
+        }
+        let ok = TerminateProcess(handle, 1);
+        let err_code = if ok == 0 { GetLastError() } else { 0 };
+        let _ = CloseHandle(handle);
+        if ok == 0 {
+            return Err(if err_code == ERROR_ACCESS_DENIED {
+                "Access denied — try running as administrator".into()
+            } else {
+                format!("TerminateProcess failed (Win32 error {err_code})")
+            });
+        }
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn kill_one(pid: u32) -> Result<(), String> {
+    // SIGKILL via libc::kill — same semantics as sysinfo's Process::kill but
+    // we get the errno on failure.
+    let ret = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+    if ret == 0 {
+        Ok(())
+    } else {
+        let errno = std::io::Error::last_os_error();
+        Err(format!("kill(SIGKILL) failed: {errno}"))
+    }
 }
 
 pub fn kill_matching(targets: &[ProcessTarget]) -> Vec<KillOutcome> {

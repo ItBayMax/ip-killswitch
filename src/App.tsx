@@ -32,6 +32,7 @@ export default function App() {
     refreshProcesses,
     killAllMatching,
     refreshSchedulerState,
+    refreshElevation,
   } = useStore();
   const [tab, setTab] = useState("dashboard");
   const [exitOpen, setExitOpen] = useState(false);
@@ -41,6 +42,7 @@ export default function App() {
     loadReport();
     refreshProcesses();
     refreshSchedulerState();
+    refreshElevation();
   }, []);
 
   useEffect(() => {
