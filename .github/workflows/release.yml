@@ -1,0 +1,224 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: "Create as draft release"
+        required: false
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+      ref:
+        description: "Tag or branch to build (only for manual run)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: Windows x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: ""
+          # Both macOS targets cross-compile from the same Apple Silicon
+          # runner. macos-13 (Intel hardware) is being retired by GitHub in
+          # 2025; we don't need it — `--target x86_64-apple-darwin` from an
+          # ARM runner produces a valid Intel .app/.dmg.
+          - name: macOS (Apple Silicon)
+            os: macos-latest
+            target: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin"
+          - name: macOS (Intel)
+            os: macos-latest
+            target: x86_64-apple-darwin
+            args: "--target x86_64-apple-darwin"
+          - name: Linux x64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            args: ""
+
+    runs-on: ${{ matrix.platform.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install Linux deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev librsvg2-dev patchelf libssl-dev \
+            libgtk-3-dev libayatana-appindicator3-dev
+
+      - run: npm ci
+
+      # When triggered by a tag push, synchronise package.json / Cargo.toml /
+      # tauri.conf.json to the tag (so the bundled binary reports e.g. 1.2.0).
+      - name: Sync version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Pinning version to $VERSION"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          node -e "
+            const fs = require('fs');
+            for (const p of ['src-tauri/tauri.conf.json']) {
+              const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+              j.version = '$VERSION';
+              fs.writeFileSync(p, JSON.stringify(j, null, 2) + '\n');
+            }
+            const ctoml = 'src-tauri/Cargo.toml';
+            let c = fs.readFileSync(ctoml, 'utf8');
+            c = c.replace(/^version = \"[^\"]+\"/m, 'version = \"$VERSION\"');
+            fs.writeFileSync(ctoml, c);
+          "
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "IP Killswitch ${{ github.ref_name }}"
+          releaseBody: |
+            ## IP Killswitch ${{ github.ref_name }}
+
+            ### Downloads
+            - **Windows**: `*-setup.exe` (NSIS) or `*.msi`
+            - **macOS**: `*.dmg` (Apple Silicon / Intel)
+            - **Linux**: `*.AppImage` / `*.deb`
+
+            The updater payloads (`*.sig`) are uploaded automatically so the
+            in-app update checker can verify and install the next release.
+          releaseDraft: ${{ github.event.inputs.draft || 'true' }}
+          prerelease: false
+          args: ${{ matrix.platform.args }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundles-${{ matrix.platform.target }}
+          path: |
+            src-tauri/target/**/release/bundle/**/*.msi
+            src-tauri/target/**/release/bundle/**/*-setup.exe
+            src-tauri/target/**/release/bundle/**/*.dmg
+            src-tauri/target/**/release/bundle/**/*.deb
+            src-tauri/target/**/release/bundle/**/*.AppImage
+            src-tauri/target/**/release/bundle/**/*.sig
+            src-tauri/target/**/release/bundle/**/*.tar.gz
+          if-no-files-found: ignore
+          retention-days: 7
+
+  publish-latest-json:
+    name: Publish latest.json (updater manifest)
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euxo pipefail
+          mkdir -p dl
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir dl
+
+      - name: Generate latest.json
+        env:
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          base="https://github.com/$REPO/releases/download/$TAG"
+
+          mac_intel_url=""; mac_intel_sig=""
+          mac_arm_url=""; mac_arm_sig=""
+          win_url=""; win_sig=""
+          linux_url=""; linux_sig=""
+
+          shopt -s nullglob
+          for sig in dl/*.sig; do
+            base_file=${sig%.sig}
+            fname=$(basename "$base_file")
+            url="$base/$fname"
+            sig_content=$(cat "$sig")
+            case "$fname" in
+              *x64*.app.tar.gz|*x86_64*.app.tar.gz)
+                mac_intel_url="$url"; mac_intel_sig="$sig_content";;
+              *aarch64*.app.tar.gz|*arm64*.app.tar.gz)
+                mac_arm_url="$url"; mac_arm_sig="$sig_content";;
+              *.app.tar.gz)
+                [ -z "$mac_intel_url" ] && { mac_intel_url="$url"; mac_intel_sig="$sig_content"; }
+                [ -z "$mac_arm_url"   ] && { mac_arm_url="$url";   mac_arm_sig="$sig_content"; };;
+              *-setup.exe)
+                win_url="$url"; win_sig="$sig_content";;
+              *.msi)
+                [ -z "$win_url" ] && { win_url="$url"; win_sig="$sig_content"; };;
+              *.AppImage)
+                linux_url="$url"; linux_sig="$sig_content";;
+            esac
+          done
+
+          tmp=$(mktemp)
+          {
+            echo '{'
+            echo "  \"version\": \"$VERSION\","
+            echo "  \"notes\": \"IP Killswitch $TAG\","
+            echo "  \"pub_date\": \"$PUB_DATE\","
+            echo '  "platforms": {'
+            first=1
+            emit() { [ $first -eq 0 ] && echo ','; printf '    "%s": {"signature": "%s", "url": "%s"}' "$1" "$2" "$3"; first=0; }
+            [ -n "$mac_intel_url" ] && emit "darwin-x86_64"  "$mac_intel_sig" "$mac_intel_url"
+            [ -n "$mac_arm_url" ]   && emit "darwin-aarch64" "$mac_arm_sig"   "$mac_arm_url"
+            [ -n "$win_url" ]       && emit "windows-x86_64" "$win_sig"       "$win_url"
+            [ -n "$linux_url" ]     && emit "linux-x86_64"   "$linux_sig"     "$linux_url"
+            echo
+            echo '  }'
+            echo '}'
+          } > "$tmp"
+          echo "Generated latest.json:"
+          cat "$tmp"
+          mv "$tmp" latest.json
+
+      - name: Upload latest.json to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" latest.json --clobber --repo "$GITHUB_REPOSITORY"

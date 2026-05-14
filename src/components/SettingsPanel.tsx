@@ -1,10 +1,8 @@
 import { useStore } from "@/store";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Button } from "@/components/ui/button";
-import { api } from "@/api";
 import type { AppConfig } from "@/types";
+import { UpdateChecker } from "@/components/UpdateChecker";
 
 export function SettingsPanel() {
   const { config, saveConfig } = useStore();
@@ -17,6 +15,18 @@ export function SettingsPanel() {
 
   return (
     <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>关于与更新</CardTitle>
+          <CardDescription>
+            当前应用版本与 GitHub Releases 的对比。启动后 6 小时内会静默检查一次；点按钮也可手动触发。
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <UpdateChecker />
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>启动与托盘</CardTitle>
@@ -53,38 +63,6 @@ export function SettingsPanel() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>诊断</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center gap-2">
-            <Label>日志等级：</Label>
-            <select
-              className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
-              value={cfg.log_level}
-              onChange={(e) => update("log_level", e.target.value)}
-            >
-              <option value="trace">trace</option>
-              <option value="debug">debug</option>
-              <option value="info">info</option>
-              <option value="warn">warn</option>
-              <option value="error">error</option>
-            </select>
-            <span className="text-xs text-muted-foreground">
-              修改后下次启动生效。
-            </span>
-          </div>
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={() => api.openLogDir()}>
-              打开日志目录
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => api.showMainWindow()}>
-              测试激活窗口
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

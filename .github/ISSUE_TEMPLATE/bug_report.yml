@@ -1,0 +1,38 @@
+name: Bug report
+description: Something broke or behaves wrong.
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Bottom-right of the app shows `v1.x.y`.
+      placeholder: v1.0.0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows 10, Windows 11, macOS 14+, macOS 12-13, Linux]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you expect, and what did you observe instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: A numbered list helps a lot.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Tail of the app log (`%LOCALAPPDATA%\io.github.itbaymax.ipkillswitch\logs\ip-killswitch.log.*` on Windows).
+      render: shell

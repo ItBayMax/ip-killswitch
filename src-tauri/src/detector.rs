@@ -134,7 +134,7 @@ fn client_for(cfg: &AppConfig) -> reqwest::Result<reqwest::Client> {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_millis(cfg.request_timeout_ms.min(15_000)))
         .timeout(Duration::from_millis(cfg.request_timeout_ms.min(30_000)))
-        .user_agent("ip-killswitch/0.1 (+https://localhost)")
+        .user_agent(concat!("ip-killswitch/", env!("CARGO_PKG_VERSION")))
         .build()
 }
 

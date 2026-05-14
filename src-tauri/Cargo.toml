@@ -1,6 +1,6 @@
 [package]
 name = "ip-killswitch"
-version = "0.1.0"
+version = "1.0.0"
 description = "Egress IP killswitch — watch the outbound IP and terminate configured processes when it leaves the allow-list"
 authors = ["ItBayMax"]
 edition = "2021"
@@ -21,6 +21,7 @@ tauri-plugin-notification = "2.0"
 tauri-plugin-os = "2.0"
 tauri-plugin-process = "2.0"
 tauri-plugin-single-instance = "2.0"
+tauri-plugin-updater = "2.0"
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

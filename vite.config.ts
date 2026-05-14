@@ -12,7 +12,9 @@ export default defineConfig({
   },
   clearScreen: false,
   server: {
-    port: 1420,
+    // Port is injected by scripts/dev-server.js via VITE_DEV_PORT (random in
+    // [50001, 59999]). Direct `vite` invocations fall back to 1420.
+    port: Number(process.env.VITE_DEV_PORT) || 1420,
     strictPort: true,
     host: "127.0.0.1",
     watch: { ignored: ["**/src-tauri/**"] },

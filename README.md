@@ -77,15 +77,42 @@ ip-killswitch/
 npm install
 
 # 2) 生成占位图标（首次或替换图标时）
-node scripts/gen-icons.mjs
+npm run gen:icons
 
 # 3) 启动开发模式（Tauri + Vite HMR）
 npm run tauri:dev
 ```
 
-开发模式会启动 Vite (`127.0.0.1:1420`) 并由 Rust 端调用 `npm run dev`，无需手动维护两个进程。
+`npm run tauri:dev` 会在 **50001–59999** 之间随机挑一个可用端口启动 Vite，
+并把端口注入到 Tauri 的 `--config` 覆盖里，避免多个项目并行开发时撞 1420。
+`scripts/dev-server.js` 负责这一切，临时配置文件写到 `src-tauri/target/dev-server.conf.json`
+（已 gitignored）。
+
+如果想强制走固定 1420：`npm run tauri:dev:fixed`。
+
+## 首次设置签名密钥（用于更新通道）
+
+应用内置 Tauri Updater 插件，自动签名 + 验签每次发布的二进制。本仓库**不会**
+提交私钥；首次 clone 后请按以下步骤一次性配置：
+
+```bash
+# 1) 生成密钥对（CLI 会交互式让你输入密码）
+npx tauri signer generate -w tauri-signing-key.key
+
+# 2) 把公钥 base64 写进 src-tauri/tauri.conf.json
+npm run sync:pubkey
+
+# 3) 把私钥与密码作为 GitHub Secret 配好（远端 release 工作流需要）
+#    Settings → Secrets and variables → Actions：
+#      TAURI_SIGNING_PRIVATE_KEY           ← cat tauri-signing-key.key
+#      TAURI_SIGNING_PRIVATE_KEY_PASSWORD  ← 你刚才输入的密码
+```
+
+`tauri-signing-key.key` / `*.key.pub` 已被 `.gitignore` 覆盖，永远不会被提交。
 
 ## 构建发行包
+
+### 本地构建
 
 ```bash
 npm run tauri:build
@@ -96,6 +123,46 @@ npm run tauri:build
 - Windows：`src-tauri/target/release/bundle/{nsis,msi}/IP Killswitch_*.exe` 与 `*.msi`；`target/release/ip-killswitch.exe` 为免安装单文件。
 - macOS：`.app` / `.dmg`（需在 macOS 上 build）。
 - Linux：`.deb` / `.AppImage`（需在 Linux 上 build）。
+
+启用了 `bundle.createUpdaterArtifacts`，每个 bundle 旁会同时输出 `*.sig` 签名文件，
+更新通道使用。
+
+### GitHub Release（自动化）
+
+打一个 v 开头的 tag 即可触发 `.github/workflows/release.yml`：
+
+```bash
+git tag -a v1.0.0 -m "v1.0.0"
+git push origin v1.0.0
+```
+
+工作流会：
+
+1. 在 Windows / macOS (Apple Silicon + Intel) / Linux 上分别构建
+2. 用 GitHub Secrets 里的 `TAURI_SIGNING_PRIVATE_KEY` 签名 updater bundle
+3. 把所有 bundle + `.sig` 上传到对应 tag 的 Release
+4. 生成 `latest.json` 并上传——这就是 in-app updater 读取的清单
+
+发布默认为 **draft**，你在 GitHub UI 里点 Publish 后才正式对外可见 / 触发用户的更新检查。
+
+## 版本号策略
+
+- `package.json` / `src-tauri/Cargo.toml` / `src-tauri/tauri.conf.json` **三处版本必须一致**
+- Release workflow 在打 tag 时会自动把三处同步到 tag 上的版本号（去掉 `v` 前缀）
+- 本地手动更新版本就改这三个文件，然后 `git tag -a vX.Y.Z -m vX.Y.Z && git push --tags`
+- 初始版本 **v1.0.0**
+
+## 应用内更新
+
+应用启动后 6 小时内自动检查一次（静默，无更新不打扰），用户也可以在窗口右上角点
+「检查更新」按钮主动触发。检查走 `plugins.updater.endpoints` 配置的 URL：
+
+```
+https://github.com/ItBayMax/ip-killswitch/releases/latest/download/latest.json
+```
+
+下载的 bundle 必须通过 `pubkey` 签名校验，签名不对会直接拒绝安装——这意味着即使
+有人劫持了 release 资产，没拿到私钥也没法假冒发布。
 
 ## 配置位置
 
