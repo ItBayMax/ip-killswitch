@@ -2,6 +2,7 @@ mod admin;
 mod commands;
 mod config;
 mod detector;
+mod firewall;
 mod logger;
 mod process_watcher;
 mod processes;
@@ -91,6 +92,19 @@ pub fn run() {
             // on a target just becomes a no-op in that case.
             crate::process_watcher::spawn(handle.clone(), state.clone());
 
+            // Subscribe firewall management to verdict changes. The closure
+            // captures a clone of AppState (cheap; everything is Arc inside),
+            // and the cache holds the closure — yes, this creates a strong
+            // cycle for the app's lifetime, which is fine because both die
+            // together at process exit. See firewall::FirewallManager docs
+            // for the apply-set / cleanup semantics.
+            {
+                let state_for_fw = state.clone();
+                state.verdict.subscribe(move |report| {
+                    crate::commands::firewall_react_to_verdict(&state_for_fw, report);
+                });
+            }
+
             // Hidden start when launched with --minimized (used by autolaunch).
             let argv: Vec<String> = std::env::args().collect();
             let start_hidden = argv.iter().any(|a| a == "--minimized");
@@ -147,9 +161,14 @@ fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
                 let _ = w.hide();
             }
         } else if cfg.confirm_exit {
-            // Defer to the frontend confirmation modal.
+            // Defer to the frontend confirmation modal. (quit_app does the
+            // firewall cleanup when the user confirms.)
             api.prevent_close();
             let _ = app.emit("ipkillswitch://request-exit", ());
+        } else {
+            // Real exit imminent — drop firewall rules now so the user
+            // doesn't end up with stranded blocks after the process is gone.
+            state.firewall.cleanup();
         }
     }
 }

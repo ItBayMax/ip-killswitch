@@ -96,6 +96,12 @@ pub struct ProcessTarget {
     /// silently fails.
     #[serde(default)]
     pub intercept_on_launch: bool,
+    /// When true and IP verdict is mismatched, add a `netsh advfirewall`
+    /// outbound-block rule for every matched process's exe path. The rule
+    /// is removed when the verdict transitions back to matched. Defaults
+    /// off; Windows-only currently. Requires admin (netsh fails otherwise).
+    #[serde(default)]
+    pub firewall_block: bool,
 }
 
 impl ProcessTarget {
@@ -155,6 +161,16 @@ pub struct AppConfig {
     /// re-enumerate freshly each time regardless.
     #[serde(default = "AppConfig::default_process_refresh_seconds")]
     pub process_refresh_seconds: u64,
+    /// Widen the firewall-block scope to also block exe paths we've seen
+    /// match in any prior detection this session, not just currently-
+    /// running ones. Without this, a user can restart a target app a few
+    /// hundred ms after we kill+block it and slip past until the next
+    /// scheduler tick. Only meaningful when at least one `ProcessTarget`
+    /// has `firewall_block: true`. Defaults off (conservative — minimizes
+    /// unexpected blocks of legitimate apps that share an exe path with a
+    /// historical match).
+    #[serde(default)]
+    pub firewall_block_include_historical_paths: bool,
 }
 
 impl AppConfig {
@@ -223,6 +239,7 @@ impl Default for AppConfig {
             confirm_exit: true,
             log_level: "info".into(),
             process_refresh_seconds: Self::default_process_refresh_seconds(),
+            firewall_block_include_historical_paths: false,
         }
     }
 }

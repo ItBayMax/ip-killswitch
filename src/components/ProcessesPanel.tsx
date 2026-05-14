@@ -110,19 +110,33 @@ export function ProcessesPanel() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex items-center gap-3">
-            <Label>触发不匹配时的处理：</Label>
-            <select
-              className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
-              value={config.kill_mode}
-              onChange={(e) =>
-                saveConfig({ ...config!, kill_mode: e.target.value as "auto" | "confirm" | "manual" })
-              }
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <div className="flex items-center gap-3">
+              <Label>触发不匹配时的处理：</Label>
+              <select
+                className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+                value={config.kill_mode}
+                onChange={(e) =>
+                  saveConfig({ ...config!, kill_mode: e.target.value as "auto" | "confirm" | "manual" })
+                }
+              >
+                <option value="confirm">用户确认后 kill</option>
+                <option value="auto">自动 kill（无需确认）</option>
+                <option value="manual">仅通知，手动 kill</option>
+              </select>
+            </div>
+            <label
+              className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer"
+              title="防火墙规则除了阻断当前运行中的匹配进程，也阻断本次会话内任何曾经匹配过的 exe 路径。可防御「kill 完用户立刻重启」的循环，但会同时阻断同路径下的其他正常用途。"
             >
-              <option value="confirm">用户确认后 kill</option>
-              <option value="auto">自动 kill（无需确认）</option>
-              <option value="manual">仅通知，手动 kill</option>
-            </select>
+              <Switch
+                checked={config.firewall_block_include_historical_paths}
+                onCheckedChange={(v) =>
+                  saveConfig({ ...config!, firewall_block_include_historical_paths: v })
+                }
+              />
+              <span>阻断历史发现的路径</span>
+            </label>
           </div>
 
           <div className="space-y-2">
@@ -222,6 +236,20 @@ export function ProcessesPanel() {
                     />
                     <span>启动即拦截</span>
                   </label>
+                  <label
+                    className="flex items-center gap-2 cursor-pointer"
+                    title="IP 不匹配时，对该进程的 exe 路径加 netsh 出站拦截规则；IP 恢复时自动撤销。仅 Windows，需要管理员；规则在 wf.msc 中以 ip-killswitch: 开头。"
+                  >
+                    <Switch
+                      checked={p.firewall_block}
+                      onCheckedChange={(v) => {
+                        const next = [...config.processes];
+                        next[idx] = { ...p, firewall_block: v };
+                        setTargets(next);
+                      }}
+                    />
+                    <span>阻断出站网络</span>
+                  </label>
                 </div>
               </div>
             ))}
@@ -241,6 +269,7 @@ export function ProcessesPanel() {
                       match_children: false,
                       match_path: false,
                       intercept_on_launch: false,
+                      firewall_block: false,
                     },
                   ])
                 }

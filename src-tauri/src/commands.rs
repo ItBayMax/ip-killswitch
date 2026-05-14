@@ -146,8 +146,67 @@ pub fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn quit_app(app: AppHandle) {
+pub fn quit_app(app: AppHandle, state: tauri::State<'_, AppState>) {
+    // Best-effort firewall cleanup before exit so we don't strand a user
+    // with blocked networking after a normal quit.
+    state.firewall.cleanup();
     app.exit(0);
+}
+
+/// Reconcile firewall block rules with the latest verdict. Called from the
+/// VerdictCache subscriber registered in `lib.rs` setup, so it runs after
+/// every detection.
+///
+/// Behaviour is intentionally idempotent — we don't track "previous verdict"
+/// state. We just compute the desired rule-set from the current verdict +
+/// config and hand it to `FirewallManager::apply_block_set`, which diffs
+/// against the currently-active rules and adds / removes as needed.
+pub fn firewall_react_to_verdict(state: &AppState, report: &crate::detector::DetectionReport) {
+    use std::collections::HashSet;
+
+    // Remember exe paths of every match in this snapshot so the historical
+    // scope (if enabled) has data to draw on later.
+    let cfg = state.config.lock().clone();
+    let processes_now = crate::processes::discover(&cfg.processes);
+    for p in &processes_now {
+        if let Some(exe) = &p.exe {
+            state.firewall.remember_path(exe.clone());
+        }
+    }
+
+    // Verdict matched (or no allow-list to enforce) → no rules.
+    if report.matched || report.allowed_ips.is_empty() {
+        state.firewall.apply_block_set(&HashSet::new());
+        return;
+    }
+
+    // Build the desired block set. Always include currently-matched
+    // processes whose target opted in. Add historical paths if the
+    // global flag is set.
+    let mut want: HashSet<String> = HashSet::new();
+    for p in processes_now {
+        // Find the target that matched this process and check its flag.
+        let blocks = cfg
+            .processes
+            .iter()
+            .any(|t| t.id == p.matched_target_id && t.firewall_block);
+        if blocks {
+            if let Some(exe) = p.exe {
+                want.insert(exe);
+            }
+        }
+    }
+    if cfg.firewall_block_include_historical_paths {
+        // Only widen scope if at least one target is firewall-enabled —
+        // otherwise we'd block paths that no enabled target cares about.
+        if cfg.processes.iter().any(|t| t.firewall_block) {
+            for p in state.firewall.known_paths() {
+                want.insert(p);
+            }
+        }
+    }
+
+    state.firewall.apply_block_set(&want);
 }
 
 #[tauri::command]

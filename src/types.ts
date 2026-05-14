@@ -27,6 +27,10 @@ export interface ProcessTarget {
    * says "mismatched", terminate the new process immediately. Windows-only
    * (kernel ETW event), requires admin to subscribe. Default false. */
   intercept_on_launch: boolean;
+  /** When IP is mismatched, add a netsh outbound-block rule for every
+   * matched process's exe path. Rule is removed when IP recovers.
+   * Default false. Windows-only; requires admin. */
+  firewall_block: boolean;
 }
 
 export type Schedule =
@@ -51,6 +55,9 @@ export interface AppConfig {
   /** Auto-refresh interval for the "matched running processes" table.
    *  0 = manual only. */
   process_refresh_seconds: number;
+  /** Widen firewall-block scope: also block exe paths seen in any prior
+   *  detection this session, not just currently-running ones. */
+  firewall_block_include_historical_paths: boolean;
 }
 
 export interface ProviderResult {
