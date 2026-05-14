@@ -31,6 +31,12 @@ pub struct KillOutcome {
     pub error: Option<String>,
 }
 
+/// Public yes/no wrapper around `match_kind` for callers (the process
+/// watcher) that don't need to distinguish Direct from Path matches.
+pub fn matches(target: &ProcessTarget, proc_name: &str, exe: Option<&str>) -> bool {
+    match_kind(target, proc_name, exe).is_some()
+}
+
 /// Reason a process matched a target. Useful to surface in the UI so the
 /// user can audit weaker matches (path-substring is more easily over-broad
 /// than name matching).

@@ -3,6 +3,7 @@ mod commands;
 mod config;
 mod detector;
 mod logger;
+mod process_watcher;
 mod processes;
 mod scheduler;
 mod state;
@@ -83,6 +84,12 @@ pub fn run() {
 
             // Kick off the scheduler if configured.
             crate::scheduler::restart(handle.clone(), state.clone());
+
+            // Start the event-driven process watcher (no-op on non-Windows).
+            // It self-degrades if WMI subscription fails (e.g. no admin),
+            // so it's safe to spawn unconditionally — `intercept_on_launch`
+            // on a target just becomes a no-op in that case.
+            crate::process_watcher::spawn(handle.clone(), state.clone());
 
             // Hidden start when launched with --minimized (used by autolaunch).
             let argv: Vec<String> = std::env::args().collect();

@@ -88,6 +88,14 @@ pub struct ProcessTarget {
     /// system / other-user processes).
     #[serde(default)]
     pub match_path: bool,
+    /// When true, the event-driven process watcher kills matching processes
+    /// the moment they start, *if* the cached IP verdict is mismatched.
+    /// Defaults off because (a) it's Windows-only at the moment and
+    /// (b) it requires admin elevation to subscribe to the kernel
+    /// `Win32_ProcessStartTrace` event class — without it the subscription
+    /// silently fails.
+    #[serde(default)]
+    pub intercept_on_launch: bool,
 }
 
 impl ProcessTarget {

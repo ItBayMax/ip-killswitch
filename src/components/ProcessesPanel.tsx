@@ -105,7 +105,8 @@ export function ProcessesPanel() {
           <CardDescription>
             可填入 exe 名（如 <code>claude.exe</code>）或进程名关键字。
             匹配规则：完整等值 → 文件名等值 → 进程名子串。
-            每行可单独配置「忽略大小写 / 关联子进程 / 匹配可执行路径」（路径匹配默认关，需要先开管理员模式才能读到系统进程的路径）。
+            每行可单独配置「忽略大小写 / 匹配可执行路径 / 关联子进程 / 启动即拦截」。
+            路径匹配 + 启动即拦截需要先开管理员模式才能稳定工作。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -207,6 +208,20 @@ export function ProcessesPanel() {
                     />
                     <span>关联子进程（树遍历）</span>
                   </label>
+                  <label
+                    className="flex items-center gap-2 cursor-pointer"
+                    title="进程一启动就检查 IP 并按需结束（事件驱动，毫秒级响应）。仅 Windows，需要管理员运行。建议给确实敏感的进程开。"
+                  >
+                    <Switch
+                      checked={p.intercept_on_launch}
+                      onCheckedChange={(v) => {
+                        const next = [...config.processes];
+                        next[idx] = { ...p, intercept_on_launch: v };
+                        setTargets(next);
+                      }}
+                    />
+                    <span>启动即拦截</span>
+                  </label>
                 </div>
               </div>
             ))}
@@ -225,6 +240,7 @@ export function ProcessesPanel() {
                       case_insensitive: true,
                       match_children: false,
                       match_path: false,
+                      intercept_on_launch: false,
                     },
                   ])
                 }

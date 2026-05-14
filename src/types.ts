@@ -23,6 +23,10 @@ export interface ProcessTarget {
    * does. Requires a readable exe path (i.e. admin elevation for system
    * processes). */
   match_path: boolean;
+  /** Event-driven kill: when the target spawns AND the cached IP verdict
+   * says "mismatched", terminate the new process immediately. Windows-only
+   * (kernel ETW event), requires admin to subscribe. Default false. */
+  intercept_on_launch: boolean;
 }
 
 export type Schedule =

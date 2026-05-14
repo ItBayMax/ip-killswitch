@@ -52,6 +52,10 @@ windows-sys = { version = "0.59", features = [
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }
+# WMI for subscribing to Win32_ProcessStartTrace events — the basis of the
+# event-driven launch interception in src/process_watcher.rs. We use the
+# synchronous iterator API on a dedicated thread (COM is per-thread state).
+wmi = "0.14"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
