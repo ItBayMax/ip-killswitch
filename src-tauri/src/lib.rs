@@ -49,13 +49,23 @@ pub fn run() {
 
             // Initialise file logging before anything else.
             let cfg = config::load(&app_dir).unwrap_or_default();
-            let _log_handle = match logger::init(&log_dir, &cfg.log_level) {
-                Ok(h) => Some(h),
+            match logger::init(&log_dir, &cfg.log_level) {
+                Ok(handle) => {
+                    // CRITICAL: the LogHandle contains a tracing-appender
+                    // WorkerGuard whose Drop sends a Shutdown message to
+                    // the background writer thread and joins it. If we let
+                    // it drop at the end of this `setup` closure, every
+                    // tracing event emitted after startup (process_watcher,
+                    // scheduled-detection ticks, etc.) gets silently
+                    // dropped because the worker is gone. We leak it on
+                    // purpose so the worker lives for the whole process —
+                    // the OS reclaims it at exit.
+                    std::mem::forget(handle);
+                }
                 Err(e) => {
                     eprintln!("failed to init logger: {e}");
-                    None
                 }
-            };
+            }
             info!(?app_dir, ?log_dir, "starting ip-killswitch");
             let state = AppState::new(app_dir.clone(), log_dir.clone(), cfg.clone());
             app.manage(state.clone());

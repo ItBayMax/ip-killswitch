@@ -48,77 +48,99 @@ pub fn spawn(_app: AppHandle, _state: AppState) {
 
 #[cfg(windows)]
 mod windows_impl {
-    use std::collections::HashMap;
-
     use serde::Deserialize;
     use tauri::{AppHandle, Emitter};
-    use tracing::{info, warn};
-    use wmi::{COMLibrary, FilterValue, WMIConnection};
+    use tauri_plugin_notification::NotificationExt;
+    use tracing::{debug, info, warn};
+    use wmi::{COMLibrary, WMIConnection};
 
     use crate::processes;
     use crate::state::AppState;
     use crate::verdict;
 
-    /// Shape we deserialize each WMI event into. Field names map to the
-    /// `Win32_ProcessStartTrace` class properties.
+    /// The `Win32_ProcessStartTrace` event class.
+    ///
+    /// IMPORTANT: the `#[serde(rename = "Win32_ProcessStartTrace")]` is what
+    /// makes wmi's `notification::<T>()` produce the correct WQL query
+    /// `SELECT * FROM Win32_ProcessStartTrace`. Without it the wmi crate
+    /// uses the Rust struct name as the class name, which silently produces
+    /// a query against a non-existent class and never fires events. (That
+    /// was the bug in the previous version of this file.)
     #[derive(Deserialize, Debug)]
+    #[serde(rename = "Win32_ProcessStartTrace")]
     #[serde(rename_all = "PascalCase")]
-    struct ProcessStart {
+    #[allow(non_camel_case_types)]
+    struct Win32_ProcessStartTrace {
         process_name: String,
         #[serde(rename = "ProcessID")]
         process_id: u32,
     }
 
     pub fn run_blocking(app: AppHandle, state: AppState) {
-        // WMI needs COM initialized on the calling thread. The wmi crate's
-        // COMLibrary takes care of that with per-thread state.
+        info!("process-watcher: thread starting");
+
+        // COM init for this thread (per-thread state).
         let com = match COMLibrary::new() {
             Ok(c) => c,
             Err(e) => {
-                warn!("process_watcher: COMLibrary init failed: {e}");
+                warn!("process-watcher: COMLibrary::new failed: {e}");
                 return;
             }
         };
+        info!("process-watcher: COM initialized");
+
         let conn = match WMIConnection::new(com) {
             Ok(c) => c,
             Err(e) => {
-                warn!("process_watcher: WMIConnection failed: {e}");
+                warn!("process-watcher: WMIConnection::new failed: {e}");
                 return;
             }
         };
+        info!("process-watcher: WMI connection opened on root\\cimv2");
 
-        let filters = HashMap::from([(
-            "TargetInstance".to_string(),
-            FilterValue::is_a::<ProcessStart>().expect("filter typed correctly"),
-        )]);
-        let iter = match conn.filtered_notification::<ProcessStart>(
-            &filters,
-            Some(std::time::Duration::from_secs(1)),
-        ) {
-            Ok(i) => i,
+        // `notification::<T>()` builds `SELECT * FROM <T>` — correct for
+        // an extrinsic event class like `Win32_ProcessStartTrace`. Don't
+        // use `filtered_notification` here: that wraps the query inside
+        // `__InstanceCreationEvent`, which is the wrong shape for ETW-
+        // backed event classes.
+        let iter = match conn.notification::<Win32_ProcessStartTrace>() {
+            Ok(it) => {
+                info!(
+                    "process-watcher: subscribed to Win32_ProcessStartTrace \
+                     — launch interception is active"
+                );
+                it
+            }
             Err(e) => {
                 warn!(
-                    "process_watcher: failed to subscribe to Win32_ProcessStartTrace \
-                     ({e}). intercept_on_launch will be inactive — typical cause is \
-                     running without admin rights."
+                    "process-watcher: subscribe to Win32_ProcessStartTrace failed: {e}. \
+                     intercept_on_launch will be a no-op. Most common cause: not \
+                     running as administrator (the kernel ETW class requires it). \
+                     Re-launch the app via the 'Restart as admin' banner."
                 );
                 return;
             }
         };
-        info!("process_watcher: subscribed to Win32_ProcessStartTrace");
 
-        for event in iter {
-            match event {
-                Ok(ev) => handle(&app, &state, ev),
-                Err(e) => warn!("process_watcher: iterator error: {e}"),
+        for ev_result in iter {
+            match ev_result {
+                Ok(ev) => {
+                    debug!(
+                        pid = ev.process_id,
+                        name = %ev.process_name,
+                        "process-watcher: process-start event"
+                    );
+                    handle(&app, &state, ev);
+                }
+                Err(e) => warn!("process-watcher: iterator error: {e}"),
             }
         }
-        info!("process_watcher: iterator exhausted");
+        info!("process-watcher: iterator closed");
     }
 
     /// React to a single process-start event. No async, no shared locks
     /// held across long operations — everything is taken, used, dropped.
-    fn handle(app: &AppHandle, state: &AppState, ev: ProcessStart) {
+    fn handle(app: &AppHandle, state: &AppState, ev: Win32_ProcessStartTrace) {
         let (targets, ttl) = {
             let cfg = state.config.lock();
             let targets: Vec<_> = cfg
@@ -145,32 +167,79 @@ mod windows_impl {
             return;
         };
 
+        info!(
+            pid = ev.process_id,
+            name = %ev.process_name,
+            exe = %exe.as_deref().unwrap_or("(unknown)"),
+            target = %target.label,
+            "process-watcher: candidate matched target rule"
+        );
+
         // Verdict gate. If the cache is fresh AND says "mismatch", kill.
         // Stale / missing cache → fail-open with a log line; the next
-        // scheduler tick will handle it (consistent with current
-        // architecture).
+        // scheduler tick will handle it.
         let verdict = state.verdict.current_fresh(ttl);
         match verdict {
             Some(v) if !v.matched && !v.allowed_ips.is_empty() => {
                 info!(
                     pid = ev.process_id,
                     name = %ev.process_name,
-                    target = %target.label,
-                    "intercept: killing newly-started process (IP verdict mismatch)"
+                    detected = ?v.detected_ips,
+                    allowed = ?v.allowed_ips,
+                    "process-watcher: killing newly-started process — IP mismatch"
                 );
                 let outcomes = processes::kill(&[ev.process_id]);
+                let killed_count = outcomes.iter().filter(|o| o.killed).count();
+                let failed_reasons: Vec<String> = outcomes
+                    .iter()
+                    .filter(|o| !o.killed)
+                    .filter_map(|o| o.error.clone())
+                    .collect();
+
+                // Right-bottom system toast so the user actually sees what
+                // happened. Without this the action is invisible (the
+                // intercepted app just "doesn't open").
+                let title = if killed_count > 0 {
+                    "已拦截进程启动"
+                } else {
+                    "拦截进程失败"
+                };
+                let body = if killed_count > 0 {
+                    format!(
+                        "{} (PID {}) 被结束 · 出口 IP 与允许列表不匹配",
+                        ev.process_name, ev.process_id
+                    )
+                } else {
+                    format!(
+                        "{} (PID {}) 命中拦截规则但 kill 失败：{}",
+                        ev.process_name,
+                        ev.process_id,
+                        failed_reasons.join("; ")
+                    )
+                };
+                let _ = app.notification().builder().title(title).body(&body).show();
                 let _ = app.emit("ipkillswitch://intercepted", &outcomes);
+
+                info!(
+                    pid = ev.process_id,
+                    killed = killed_count,
+                    "process-watcher: kill outcome"
+                );
             }
             Some(_) => {
                 // Either matched, or no allow-list configured — let through.
+                debug!(
+                    pid = ev.process_id,
+                    "process-watcher: verdict OK, letting process run"
+                );
             }
             None => {
                 warn!(
                     pid = ev.process_id,
                     name = %ev.process_name,
                     target = %target.label,
-                    "intercept candidate but verdict stale/missing — fail-open, \
-                     next scheduler tick will catch up"
+                    "process-watcher: intercept candidate but verdict stale/missing — \
+                     fail-open. Next scheduler tick will catch up."
                 );
             }
         }
